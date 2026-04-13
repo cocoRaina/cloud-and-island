@@ -934,8 +934,24 @@ Mini App 的所有数据都从你已经搭好的 API 接口读取，不需要额
 
 ## 安全注意事项
 
-- Bot Token、OAuth Client Secret 等敏感信息不要提交到 git
-- Telegram bot 的 `allowedUsers` 只填自己的 ID
+⚠️ **不要给 Claude Code root 权限！**
+
+在 VPS 上新建一个普通用户给 Claude Code 用：
+
+```bash
+# 创建 claude 用户
+useradd -m -s /bin/bash claude
+# 给它项目目录的权限
+chown -R claude:claude /www/memory-server
+# 用 claude 用户运行 Claude Code
+su - claude
+```
+
+Claude Code 只需要读写项目文件的权限，不需要也不应该有 root 权限。root 权限意味着它可以删系统文件、改防火墙规则、装任何软件——这不是你想要的。
+
+其他安全事项：
+- Bot Token、OAuth Client Secret 等敏感信息不要提交到 git，加到 `.gitignore`
+- Telegram bot 的 `allowedUsers` 只填自己的 ID，不然陌生人也能跟你的 Claude 说话
 - 开服务器防火墙，只放行 22、80、443 端口
 - 定期备份数据库：`cp memories.db memories_backup_$(date +%Y%m%d).db`
 
