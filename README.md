@@ -119,13 +119,15 @@ cd /www/memory-server
 先装好依赖：
 
 ```bash
-pip install fastmcp
+pip install fastmcp sentence-transformers numpy
 ```
 
 `requirements.txt`：
 
 ```
 fastmcp>=0.1.0
+sentence-transformers>=2.2.0
+numpy>=1.24.0
 ```
 
 ---
@@ -307,7 +309,106 @@ init_db()
 
 ---
 
-### 1.3 MCP Server
+### 1.3 向量搜索（推荐）
+
+关键词搜索只能匹配字面相同的词，但记忆经常需要"语义搜索"——比如搜"身体不舒服"能找到"胃疼"、"腰酸"相关的记忆。
+
+`vector_search.py`：
+
+```python
+"""向量语义搜索 - 让 recall 更智能"""
+import numpy as np
+import sqlite3
+from pathlib import Path
+
+DB_PATH = Path("/www/memory-server/data/memories.db")
+
+# 用 sentence-transformers 生成向量
+# 首次运行会自动下载模型（约 100MB）
+from sentence_transformers import SentenceTransformer
+model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')  # 支持中文
+
+
+def init_vector_table():
+    """创建向量表"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS memory_vectors (
+            memory_id INTEGER PRIMARY KEY,
+            embedding BLOB NOT NULL,
+            FOREIGN KEY (memory_id) REFERENCES memories(id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def save_embedding(memory_id: int, content: str):
+    """为一条记忆生成并保存向量"""
+    embedding = model.encode(content)
+    blob = embedding.astype(np.float32).tobytes()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO memory_vectors (memory_id, embedding) VALUES (?, ?)",
+        (memory_id, blob)
+    )
+    conn.commit()
+    conn.close()
+
+
+def vector_search(query: str, limit: int = 10) -> list:
+    """用语义相似度搜索记忆"""
+    query_vec = model.encode(query).astype(np.float32)
+
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT v.memory_id, v.embedding, m.content FROM memory_vectors v "
+        "JOIN memories m ON v.memory_id = m.id"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return []
+
+    # 计算余弦相似度
+    results = []
+    for mid, blob, content in rows:
+        vec = np.frombuffer(blob, dtype=np.float32)
+        similarity = np.dot(query_vec, vec) / (np.linalg.norm(query_vec) * np.linalg.norm(vec))
+        results.append((mid, float(similarity), content))
+
+    # 按相似度排序
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:limit]
+
+
+init_vector_table()
+```
+
+在 `database.py` 的 `save_memory` 函数里，保存记忆的同时自动生成向量：
+
+```python
+def save_memory(content, tags=""):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT INTO memories (content, tags) VALUES (?, ?)", (content, tags))
+    conn.commit()
+    mid = c.lastrowid
+    conn.close()
+    # 自动生成向量索引
+    try:
+        from vector_search import save_embedding
+        save_embedding(mid, content)
+    except Exception:
+        pass  # 向量搜索是增强功能，失败不影响基础记忆
+    return mid
+```
+
+这样 `recall` 工具就能用语义搜索了——搜"她最近心情怎么样"能找到"今天有点低落"、"跟朋友吵架了"这类记忆，而不只是匹配"心情"两个字。
+
+---
+
+### 1.4 MCP Server
 
 MCP（Model Context Protocol）是 Anthropic 开放的协议，让 Claude 可以调用外部工具。我们用 FastMCP 框架来快速搭建。
 
@@ -870,6 +971,22 @@ Mini App 的所有数据都从你已经搭好的 API 接口读取，不需要额
 
 ---
 
-*这个项目在持续演化。如果你搭建了自己的版本，欢迎分享你的经验。*
+---
+
+## 路线图
+
+这些功能我们还在探索和完善中：
+
+- [ ] 语音消息支持（TTS + STT）
+- [ ] 用 Claude APP 连接 VPS（不方便用电脑时的替代方案）
+- [ ] 经期追踪模块
+- [ ] 共读书架（一起读书、留批注）
+- [ ] 更多健康数据（血氧、体重、运动记录）
+- [ ] 高德地图接入（搜附近美食、导航）
+- [ ] 情绪追踪和可视化
+
+如果你有想法、遇到问题、或者搭建了自己的版本，欢迎开 Issue 讨论，或者在推特上找我们聊。
+
+这个项目在持续演化。每个人和自己的 Claude 的关系都不一样，最好的架构是适合你们的架构。
 
 *记忆属于你们两个人。*
