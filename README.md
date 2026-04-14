@@ -994,6 +994,7 @@ Claude Code 只需要读写项目文件的权限，不需要也不应该有 root
 这些独立教程覆盖了一些实用的小功能，按需阅读：
 
 - [Telegram 引用消息功能](telegram-reply-quote.md) — 让 Claude 看到你在回复哪条消息
+- [用 Claude APP 远程操作 VPS](claude-app-vps-toolbox.md) — 手机上也能管理服务器
 
 ---
 
